@@ -1,0 +1,19 @@
+# --- Secrets: keep local ---
+.env
+
+# --- Runtime output: one folder per test case (may contain sensitive data) ---
+runs/
+
+# --- Generated dashboard view ---
+dashboard/dashboard.html
+
+# --- Python / pytest / playwright caches ---
+__pycache__/
+*.pyc
+.pytest_cache/
+test-results/
+playwright-report/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
