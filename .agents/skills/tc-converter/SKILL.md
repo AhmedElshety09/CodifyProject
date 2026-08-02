@@ -6,7 +6,8 @@ description: >
   test case. The test case ID is the only mandatory field; all other fields are
   derived from the input or predicted, and are included only when the input supports
   them. Each step pairs an action with its expected result. This skill is write-only:
-  it never reads runs/ or any existing TC_*.json. On success it creates
+  it never reads runs/ or any existing TC_*.json. The candidate JSON must pass the
+  bundled validate.py gate before anything is written to disk. On success it creates
   runs/TC_<ID>_<timestamp>/ with empty subfolders (Video, Screenshots, Report,
   Automation, Logs) and a JSON/TC_<ID>.json file, then shows the JSON for approval.
   tc-runner fills the remaining folders.
@@ -14,23 +15,25 @@ description: >
 
 # TC Converter
 
-Convert raw input into a structured JSON test case, create its run folder, and
-present the JSON for approval.
+Convert raw input into a structured JSON test case, validate it, create its run
+folder, and present the JSON for approval. The test case ID is the only hard
+requirement.
 
 ## Scope
 
 Write-only. Never list, open, or read `runs/` or any existing `TC_*.json` — the
-schema below is the only format reference. The only filesystem actions are
-creating `runs/TC_<ID>_<timestamp>/` and writing `JSON/TC_<ID>.json` inside it.
-The timestamp guarantees uniqueness, so no collision check or directory listing.
+schema below is the only format reference. The only filesystem actions are running
+`validate.py`, creating `runs/TC_<ID>_<timestamp>/`, and writing
+`JSON/TC_<ID>.json` inside it. The timestamp guarantees uniqueness, so no collision
+check or directory listing.
 
 ## Fields
 
 | Field | Rule |
 |---|---|
-| `id` | **Mandatory.** Missing → stop and ask for it. Never invent it. |
+| `id` | Mandatory. Missing → stop and ask for it. Never invent it. Must match `^[A-Za-z0-9_-]+$`. |
 | `title` | Short, action-oriented summary. `"UNTITLED"` if none given. |
-| `steps` | Required, ordered. Each step = `action` + `expected`. Predict a specific, observable `expected` if the input omits it (tc-runner later refines it against the live page). Never emit `expected_result`. |
+| `steps` | Required, non-empty, ordered (1-based, sequential). Each step = `action` + `expected`. Predict a specific, observable `expected` if the input omits it (tc-runner later refines it against the live page). Never emit `expected_result`. |
 | `preconditions` | Only if the user stated some. |
 | `test_data` | Only if concrete values are given. |
 
@@ -68,23 +71,46 @@ Minimal case (only required keys):
 
 ## Procedure
 
-1. **Locate the ID.** If none is provided, stop with:
+1. **Build the JSON** from the raw input per the Fields table and Schema above.
+
+2. **Validate before writing (hard-fail gate).** Pipe the candidate JSON to
+   `validate.py` and read the exit code. Do NOT create the folder or write anything
+   unless the exit code is `0`.
+   ```powershell
+   $json | python .agents/skills/tc-converter/validate.py --stdin
+   if ($LASTEXITCODE -ne 0) {
+     # validation failed: show the printed errors, fix the JSON, and re-validate.
+     # Do NOT create any folder or file.
+   }
    ```
-   Blocked: a test case ID is required to continue.
-   The ID is the only mandatory field; everything else can be generated.
-   Please provide the test case ID (for example, 27500).
-   ```
-2. **Build the JSON** from the raw input per the Fields table and Schema above.
-3. **Create the folder and write the file** (PowerShell — quote paths, no bash heredocs):
+   - Exit `0` → valid, proceed to step 4.
+   - Exit `1` → schema errors were printed; correct them and re-run this step.
+   - Exit `2` → malformed JSON or bad input; fix and re-run.
+   The validator is deterministic and token-free (plain Python, no model call).
+
+3. **Create the folder and write the file** (PowerShell — quote paths, no bash
+   heredocs), only after the gate passes:
    ```powershell
    $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
    $run = "runs/TC_<ID>_$stamp"
    New-Item -ItemType Directory -Force -Path "$run/Video","$run/Screenshots","$run/Report","$run/JSON","$run/Automation","$run/Logs" | Out-Null
    ```
    Write the JSON to `$run/JSON/TC_<ID>.json`.
+
 4. **Present and request approval:**
    ```
    Created: runs/TC_<ID>_<stamp>/ (Video, Screenshots, Report, JSON, Automation, Logs)
    Wrote:   JSON/TC_<ID>.json (remaining folders are empty; tc-runner fills them)
    Review the JSON above and reply "approve" to run it with tc-runner.
    ```
+
+## Rules
+
+- Read nothing. Never list or open `runs/` or any existing `TC_*.json`.
+- The ID is the only stop. Output is JSON only.
+- Every step carries both an `action` and an `expected`. Never emit `expected_result`.
+- Include a key only when the input supports it; no placeholder values.
+- Nothing is written to disk until `validate.py` exits `0`.
+- Shell is PowerShell; quote paths; no bash heredocs.
+- The only filesystem writes are the new `runs/TC_<ID>_<timestamp>/` folder and its
+  `JSON/TC_<ID>.json`.
