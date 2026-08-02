@@ -12,11 +12,17 @@ Exit codes:
     2  = usage / unreadable input / malformed JSON
 
 Usage (PowerShell):
-    # From stdin (recommended - nothing hits disk until this passes):
+    # From a file (recommended - robust to PowerShell's UTF-8 BOM):
+    python .agents/skills/tc-converter/validate.py path/to/TC_<ID>.json
+
+    # From stdin:
     $json | python .agents/skills/tc-converter/validate.py --stdin
 
-    # From a file:
-    python .agents/skills/tc-converter/validate.py path/to/TC_<ID>.json
+Notes:
+    Files are read with the 'utf-8-sig' codec, which transparently strips a UTF-8
+    BOM if present (Windows PowerShell's `Set-Content -Encoding utf8` writes one) and
+    behaves identically to plain UTF-8 when there is no BOM. A leading BOM is also
+    stripped from stdin, so neither input path can be poisoned by an invisible byte.
 """
 
 import argparse
@@ -27,6 +33,7 @@ import sys
 # region config
 ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
 REQUIRED_STEP_KEYS = ("step", "action", "expected")
+BOM = "\ufeff"
 # endregion
 
 
@@ -88,6 +95,12 @@ def validate(data):
     if "test_data" in data and not isinstance(data["test_data"], dict):
         errors.append("'test_data' must be an object when present.")
 
+    # guesses: optional, array of strings if present
+    if "guesses" in data:
+        g = data["guesses"]
+        if not isinstance(g, list) or not all(isinstance(x, str) for x in g):
+            errors.append("'guesses' must be an array of strings when present.")
+
     return errors
 # endregion
 
@@ -103,7 +116,9 @@ def main():
         raw = sys.stdin.read()
     elif args.path:
         try:
-            with open(args.path, "r", encoding="utf-8") as f:
+            # 'utf-8-sig' strips a leading BOM if present (e.g. from PowerShell's
+            # Set-Content -Encoding utf8) and is identical to utf-8 otherwise.
+            with open(args.path, "r", encoding="utf-8-sig") as f:
                 raw = f.read()
         except OSError as e:
             print(f"BLOCKED - cannot read file: {e}", file=sys.stderr)
@@ -111,6 +126,10 @@ def main():
     else:
         print("BLOCKED - provide a file path or use --stdin.", file=sys.stderr)
         sys.exit(2)
+
+    # Defensive: strip any leading BOM that survived (e.g. from a BOM'd stdin stream).
+    if raw.startswith(BOM):
+        raw = raw.lstrip(BOM)
 
     try:
         data = json.loads(raw)
