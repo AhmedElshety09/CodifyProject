@@ -1,77 +1,90 @@
 ---
 name: tc-converter
-description: STEP 1 of 2. Turns a raw test case (or loose text, or any test-case
-  structure) into standard TC JSON and creates its folder. Use when the user says
-  "TC with id ..." or pastes a test case. The ONLY mandatory field is the test
-  case ID; everything else the agent derives, defaults, or predicts. On success
-  it creates runs/TC_<ID>_<timestamp>/ with the EMPTY subfolders (Video,
-  Screenshots, Report, Automation, Logs) plus a JSON/ folder containing
-  TC_<ID>.json, then shows the JSON for approval. tc-runner fills the rest.
+description: >
+  Step 1 of 2. Converts a raw test case (or loose text) into a structured TC JSON
+  and creates its run folder. Use when the user provides a test case ID or pastes a
+  test case. The test case ID is the only mandatory field; all other fields are
+  derived from the input or predicted, and are included only when the input supports
+  them. Each step pairs an action with its expected result. This skill is write-only:
+  it never reads runs/ or any existing TC_*.json. On success it creates
+  runs/TC_<ID>_<timestamp>/ with empty subfolders (Video, Screenshots, Report,
+  Automation, Logs) and a JSON/TC_<ID>.json file, then shows the JSON for approval.
+  tc-runner fills the remaining folders.
 ---
 
-## TC Converter — the Gate 🚦
+# TC Converter
 
-Turn raw input into a clean JSON test case, create its folder, show it, ask to
-approve. The **only hard requirement is the test case ID**.
+Convert raw input into a structured JSON test case, create its run folder, and
+present the JSON for approval.
 
-### One folder per test case
-The converter creates ONE folder: `runs/TC_<ID>_<timestamp>/`. It leaves
-`Video/`, `Screenshots/`, `Report/`, `Automation/`, and `Logs/` **empty**, and
-writes only `JSON/TC_<ID>.json`. tc-runner fills the empty folders later (video,
-screenshots, report, the pytest automation, and — only if a step fails — logs).
+## Scope
 
-### Field rules
+Write-only. Never list, open, or read `runs/` or any existing `TC_*.json` — the
+schema below is the only format reference. The only filesystem actions are
+creating `runs/TC_<ID>_<timestamp>/` and writing `JSON/TC_<ID>.json` inside it.
+The timestamp guarantees uniqueness, so no collision check or directory listing.
+
+## Fields
+
 | Field | Rule |
 |---|---|
-| **id** | **MANDATORY.** The only STOP. If missing → ask and wait. Never invent it. |
-| **title** | If none given → `"UNTITLED"`. |
-| **steps** | Use provided steps, or derive them from the raw text. |
-| **expected** (per step) | If omitted → **predict** a specific, observable result. (tc-runner refines these against the real page.) |
-| **preconditions** | Include **only if** the user stated some; else omit the key. |
-| **test_data** | From concrete values in the input; else `{}`. |
+| `id` | **Mandatory.** Missing → stop and ask for it. Never invent it. |
+| `title` | Short, action-oriented summary. `"UNTITLED"` if none given. |
+| `steps` | Required, ordered. Each step = `action` + `expected`. Predict a specific, observable `expected` if the input omits it (tc-runner later refines it against the live page). Never emit `expected_result`. |
+| `preconditions` | Only if the user stated some. |
+| `test_data` | Only if concrete values are given. |
 
-*(No `credentials_key` — the runner handles login from `.env` via CFG.)*
+`id` and `steps` are the only structural keys. Include every other key only when
+the input supports it — no empty or placeholder values.
 
-### JSON format
+## Schema
+
 ```json
 {
   "id": "LOGIN_01",
-  "title": "Sign in and verify the dashboard",
-  "test_data": {},
+  "title": "Sign in with valid credentials and verify the dashboard",
+  "preconditions": ["The user has a valid, active account", "The application URL is reachable"],
+  "test_data": { "username": "standard_user", "password": "<from .env / CFG>" },
   "steps": [
-    { "step": 1, "action": "Open the application", "expected": "The login page is visible", "expected_result": "pass" },
-    { "step": 2, "action": "Enter valid username and password and submit", "expected": "The dashboard is shown", "expected_result": "pass" }
+    { "step": 1, "action": "Open the application URL", "expected": "The login page is visible with username, password and a submit control" },
+    { "step": 2, "action": "Enter a valid username and password", "expected": "Both fields accept the input; no validation error is shown" },
+    { "step": 3, "action": "Click the submit control", "expected": "The user is authenticated and redirected to the dashboard" }
   ]
 }
 ```
-If the user stated preconditions, add a `"preconditions": [ "..." ]` array right
-after `title`.
 
-### Procedure
-1. **Gate:** find an **ID**. If none → STOP:
+Minimal case (only required keys):
+
+```json
+{
+  "id": "SEARCH_01",
+  "title": "Search returns matching results",
+  "steps": [
+    { "step": 1, "action": "Open the application", "expected": "The search box is visible" },
+    { "step": 2, "action": "Type a known query and press Enter", "expected": "A results list containing the query term is shown" }
+  ]
+}
+```
+
+## Procedure
+
+1. **Locate the ID.** If none is provided, stop with:
    ```
-   🚦 GATE: BLOCKED — I need a Test Case ID to continue.
-   The ID is the only mandatory field; everything else I can generate.
-   ➡️ Please provide the test case ID (e.g., 27500).
+   Blocked: a test case ID is required to continue.
+   The ID is the only mandatory field; everything else can be generated.
+   Please provide the test case ID (for example, 27500).
    ```
-2. **Build the JSON** per the format above (title→UNTITLED if missing; derive
-   steps; predict missing expected; preconditions only if stated).
-3. **Create the folder + write JSON** (PowerShell):
+2. **Build the JSON** from the raw input per the Fields table and Schema above.
+3. **Create the folder and write the file** (PowerShell — quote paths, no bash heredocs):
    ```powershell
    $stamp = Get-Date -Format 'yyyyMMdd_HHmmss'
    $run = "runs/TC_<ID>_$stamp"
    New-Item -ItemType Directory -Force -Path "$run/Video","$run/Screenshots","$run/Report","$run/JSON","$run/Automation","$run/Logs" | Out-Null
    ```
-   Write the JSON to `$run/JSON/TC_<ID>.json`. **Remember the exact folder name.**
-4. **Show + approve:**
+   Write the JSON to `$run/JSON/TC_<ID>.json`.
+4. **Present and request approval:**
    ```
-   🚦 GATE: PASSED ✅
-   📁 Created: runs/TC_<ID>_<stamp>/ (Video, Screenshots, Report, JSON, Automation, Logs)
-   📄 Wrote:  JSON/TC_<ID>.json  (other folders are empty; tc-runner fills them)
-   Please review the JSON above and reply "approve" to run it with tc-runner.
+   Created: runs/TC_<ID>_<stamp>/ (Video, Screenshots, Report, JSON, Automation, Logs)
+   Wrote:   JSON/TC_<ID>.json (remaining folders are empty; tc-runner fills them)
+   Review the JSON above and reply "approve" to run it with tc-runner.
    ```
-
-### Rules
-- ID is the only STOP. Output is **JSON only** (no `.md` output).
-- Shell is **PowerShell**; quote paths; never bash heredocs.
-- Folder lives under **runs/** so tc-runner can find it and pytest can fill it.
