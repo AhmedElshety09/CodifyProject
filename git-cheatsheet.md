@@ -343,7 +343,7 @@ git reflog                              # 🦸 Your safety net: a log of EVERY m
 
 ---
 
-## 16. Glossary
+## 16. Glossary 
 
 | Term | Meaning |
 |---|---|
