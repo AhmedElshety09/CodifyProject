@@ -3,14 +3,14 @@
   example_test.py  —  THE CANONICAL TEMPLATE for every generated test
 ==============================================================================
 This is the general, ideal shape of a pytest + Playwright (Python) test.
-tc-runner MUST generate every `Automation/test_TC_<ID>.py` in THIS exact shape.
+tc-runner MUST generate every `Automation/test_<ID>.py` in THIS exact shape.
 It is intentionally NOT tied to any specific website — it drives whatever
 `CFG["base_url"]` (from .env) points at, and does one universal check so it
 runs green against any URL as a smoke test.
 
 MANDATORY CONVENTIONS (the runner copies all of these):
   1. Decorators  @pytest.mark.tc_id(...) / @pytest.mark.tc_title(...)
-  2. Signature   def test_TC_<ID>(page, CFG, reporter):   (CFG comes from .env)
+  2. Signature   def test_<ID>(page, CFG, reporter):   (CFG comes from .env)
   3. Precondition line before the steps: page.goto(CFG["base_url"], ...)
   4. One  `with reporter.step(page, n, action, expected):`  block per step
   5. SEMANTIC locators captured live, in priority order:
@@ -27,10 +27,11 @@ from playwright.sync_api import Page, expect
 
 @pytest.mark.tc_id("EXAMPLE")
 @pytest.mark.tc_title("Canonical template — smoke check that base_url loads")
-def test_TC_EXAMPLE(page: Page, CFG, reporter):
+def test_EXAMPLE(page: Page, CFG, reporter):
 
     # --- Preconditions --------------------------------------------------------
-    # If a test needs login, do it here using CFG (see the commented block at the
+    # If a test needs login, it is expressed as ordinary steps that fill in the
+    # values carried by the test case itself (see the commented block at the
     # bottom). Otherwise just open the app under test.
     page.goto(CFG["base_url"], wait_until=CFG["wait_until"])
 
@@ -56,15 +57,19 @@ def test_TC_EXAMPLE(page: Page, CFG, reporter):
 
 
 # ===========================================================================
-#  LOGIN PRECONDITION TEMPLATE (use when the JSON has a login precondition):
+#  LOGIN TEMPLATE (when the test case includes login steps):
+#
+#  There is no separate credential mechanism. Login is expressed as ordinary
+#  steps whose values come from the test case's own test_data — captured live
+#  and asserted just like any other step.
 #
 #   page.goto(CFG["base_url"], wait_until=CFG["wait_until"])
-#   page.get_by_label("Username").fill(CFG["username"])
-#   page.get_by_label("Password").fill(CFG["password"])
-#   page.get_by_role("button", name="Sign in").click()
-#   try:
+#   with reporter.step(page, 1, "Enter the username", "The username is accepted"):
+#       page.get_by_label("Username").fill("standard_user")
+#   with reporter.step(page, 2, "Enter the password", "The password is accepted"):
+#       page.get_by_label("Password").fill("secret_sauce")
+#   with reporter.step(page, 3, "Click the Login button", "The dashboard is shown"):
+#       page.get_by_role("button", name="Login").click()
 #       expect(page.get_by_role("heading", name="Dashboard")).to_be_visible(
 #           timeout=CFG["t_expect"])
-#   except Exception:
-#       pytest.skip("BLOCKED: could not reach the logged-in start state")
 # ===========================================================================

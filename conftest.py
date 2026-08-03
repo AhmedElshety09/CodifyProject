@@ -9,7 +9,7 @@
   * HELPERS   (save_locator_map -> Automation/locators.json)
 
 A generated test uses the fixtures directly in its signature:
-    def test_TC_<ID>(page, CFG, reporter):
+    def test_<ID>(page, CFG, reporter):
 
 Fixes baked in:
   * Config   -> everything comes from .env (edit .env, never the code).
@@ -60,9 +60,6 @@ def _bool(key, default=False):
 CFG = {
     "base_url":   _get("MV_BASE_URL", "https://example.com"),
 
-    "username":   _get("MV_USER", "user"),
-    "password":   _get("MV_PASS", "CHANGE_ME"),
-
     "browser":    _get("MV_BROWSER", "chromium"),   # chromium | firefox | webkit
     "headless":   _bool("MV_HEADLESS", False),
     "viewport":   {"width": _int("MV_VIEWPORT_W", 1440),
@@ -103,8 +100,9 @@ def _ensure(rd: Path) -> Path:
 def run_dir(tc_id=None) -> Path:
     """The current test-case folder.
     * If TC_RUN_DIR is set (tc-runner flow) -> that exact folder, always.
-    * Otherwise -> runs/TC_<ID>_<timestamp>/, one cached folder per tc_id
-      (never 'TC_manual_'), so video/screenshots/report all land together."""
+    * Otherwise -> runs/<ID>/, ID-keyed (matches tc-converter), so a token-free
+      pytest rerun writes video/screenshots/report back into the SAME folder
+      instead of spawning a new timestamped one."""
     env = os.getenv("TC_RUN_DIR", "").strip()
     if env:
         rd = Path(env)
@@ -114,7 +112,7 @@ def run_dir(tc_id=None) -> Path:
 
     key = str(tc_id or "RUN")
     if key not in _RUN_DIRS:
-        rd = PROJECT_ROOT / "runs" / f"TC_{key}_{datetime.now():%Y%m%d_%H%M%S}"
+        rd = PROJECT_ROOT / "runs" / key
         _RUN_DIRS[key] = _ensure(rd)
     return _RUN_DIRS[key]
 
@@ -130,11 +128,6 @@ def save_locator_map(mapping: dict, tc_id=None) -> Path:
 # ============================================================================
 #  FAILURE DIAGNOSTICS  —  classification + summary hints
 # ============================================================================
-CATEGORY_EMOJI = {
-    "TIMEOUT": "⏱️", "LOCATOR_NOT_FOUND": "🔍", "ASSERTION": "❌",
-    "NETWORK": "🌐", "STEP_LOGIC": "🧩", "UNKNOWN": "❓",
-}
-
 CATEGORY_HINT = {
     "TIMEOUT": "The element never became actionable in time. A prior step may "
                "have left the page in the wrong state, a spinner/overlay never "
@@ -313,8 +306,7 @@ class Reporter:
             if e["result"] == "fail":
                 L.append(f"           └─ expected: {e['expected']}")
         L.append("")
-        L.append(f"FAILURE at Step {record['step']}: "
-                 f"{CATEGORY_EMOJI.get(record['category'],'')} {record['category']}")
+        L.append(f"FAILURE at Step {record['step']}: {record['category']}")
         L.append(f"  {record['error_type']}: {first_line}")
         L.append(f"  URL   : {record['url_at_failure']}  (title: {record['page_title']})")
         L.append(f"  Console errors : {len(record['console_errors'])}")
@@ -327,17 +319,16 @@ class Reporter:
 
 def _summary_md(record, first_line):
     cat = record["category"]
-    emoji = CATEGORY_EMOJI.get(cat, "")
     hint = CATEGORY_HINT.get(cat, "")
     con = record["console_errors"]
     net = record["failed_requests"]
     con_lines = "\n".join(f"  - [{c.get('type','?')}] {c.get('text','')}" for c in con) or "  (none)"
     net_lines = "\n".join(f"  - {n.get('status','?')} {n.get('url','')}" for n in net) or "  (none)"
     n = record["step"]
-    return f"""# {emoji} Failure Summary — {record['tc_id']}
+    return f"""# Failure Summary — {record['tc_id']}
 
 **Failed at:** Step {n} — "{record['action']}"
-**Category:** {emoji} {cat}
+**Category:** {cat}
 **Error:** `{record['error_type']}: {first_line}`
 
 ## What happened
